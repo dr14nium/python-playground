@@ -46,10 +46,11 @@ def create_table_from_ui(db_config, table_name, column_definitions, geojson_file
 
         column_definitions_str = ", ".join([f'"{col_name}" {col_type}' for col_name, col_type in column_definitions])
 
+        # Change MultiPolygon to MultiPolygonZ to accommodate Z dimension
         create_table_query = f"""
             CREATE TABLE IF NOT EXISTS public."{table_name}" (
                 id SERIAL PRIMARY KEY,
-                geom geometry(MultiPolygon, 4326),
+                geom geometry(MultiPolygonZ, 4326),  -- Updated here
                 {column_definitions_str}
             );
         """
@@ -62,15 +63,15 @@ def create_table_from_ui(db_config, table_name, column_definitions, geojson_file
         original_column_names = [col[0] for col in columns]
         renamed_column_names = [col_name for col_name, _ in column_definitions]
 
-        # Loop melalui setiap feature dari GeoJSON dan masukkan datanya
+        # Loop through each feature from GeoJSON and insert data
         for feature in geojson_data['features']:
             geom = feature['geometry']
             properties = feature['properties']
 
-            # Ambil hanya kolom yang ada dalam daftar kolom yang tidak dihapus
+            # Get only the columns that are not deleted
             column_values = [properties.get(orig_col) for orig_col in original_column_names if orig_col in renamed_column_names]
 
-            # Pastikan bahwa jumlah kolom dan jumlah nilai sama
+            # Ensure that the number of columns and values match
             cur.execute(f"""
                 INSERT INTO public."{table_name}" (
                     geom, {", ".join([f'"{col_name}"' for col_name in renamed_column_names])}
@@ -88,6 +89,32 @@ def create_table_from_ui(db_config, table_name, column_definitions, geojson_file
 
         status_label.config(text="Data inserted successfully!")
         messagebox.showinfo("Success", "Data inserted successfully into the database.")
+    except Exception as e:
+        status_label.config(text="Error occurred!")
+        messagebox.showerror("Error", f"An error occurred: {e}")
+
+# Fungsi untuk menghapus tabel
+def delete_table(db_config, table_name, status_label):
+    try:
+        conn = psycopg2.connect(
+            dbname=db_config['dbname'],
+            user=db_config['user'],
+            password=db_config['password'],
+            host=db_config['host'],
+            port=db_config.get('port', 5432)
+        )
+        cur = conn.cursor()
+
+        # Drop the table
+        drop_table_query = f'DROP TABLE IF EXISTS public."{table_name}";'
+        cur.execute(drop_table_query)
+        conn.commit()
+
+        cur.close()
+        conn.close()
+
+        status_label.config(text="Table deleted successfully!")
+        messagebox.showinfo("Success", f"Table '{table_name}' deleted successfully.")
     except Exception as e:
         status_label.config(text="Error occurred!")
         messagebox.showerror("Error", f"An error occurred: {e}")
@@ -302,6 +329,16 @@ def run_ui():
 
     submit_button = tk.Button(button_frame, text="Create Table", command=submit)
     submit_button.grid(row=0, column=1, padx=5)
+
+    # Button to delete the table
+    delete_button = tk.Button(button_frame, text="Delete Table", command=lambda: delete_table({
+        'dbname': dbname_entry.get(),
+        'user': user_entry.get(),
+        'password': password_entry.get(),
+        'host': host_entry.get(),
+        'port': port_entry.get() or 5432
+    }, table_name_entry.get(), status_label))
+    delete_button.grid(row=0, column=2, padx=5)
 
     columns_canvas = tk.Canvas(root)
     columns_canvas.pack(side="left", fill="both", expand=True)
