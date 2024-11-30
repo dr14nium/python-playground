@@ -46,11 +46,11 @@ def create_table_from_ui(db_config, table_name, column_definitions, geojson_file
 
         column_definitions_str = ", ".join([f'"{col_name}" {col_type}' for col_name, col_type in column_definitions])
 
-        # Change MultiPolygon to MultiPolygonZ to accommodate Z dimension
+        # Definisi tabel dengan MultiPolygonZ
         create_table_query = f"""
             CREATE TABLE IF NOT EXISTS public."{table_name}" (
                 id SERIAL PRIMARY KEY,
-                geom geometry(MultiPolygonZ, 4326),  -- Updated here
+                geom geometry(MultiPolygonZ, 4326),
                 {column_definitions_str}
             );
         """
@@ -63,20 +63,27 @@ def create_table_from_ui(db_config, table_name, column_definitions, geojson_file
         original_column_names = [col[0] for col in columns]
         renamed_column_names = [col_name for col_name, _ in column_definitions]
 
-        # Loop through each feature from GeoJSON and insert data
+        # Loop melalui setiap fitur GeoJSON dan masukkan data
         for feature in geojson_data['features']:
             geom = feature['geometry']
             properties = feature['properties']
 
-            # Get only the columns that are not deleted
+            # Konversi geometri ke format 3D jika diperlukan
+            if geom['type'] == 'MultiPolygon':
+                geom['coordinates'] = [
+                    [[coord + [0] if len(coord) == 2 else coord for coord in ring] for ring in polygon]
+                    for polygon in geom['coordinates']
+                ]
+
+            # Ambil kolom yang tidak dihapus
             column_values = [properties.get(orig_col) for orig_col in original_column_names if orig_col in renamed_column_names]
 
-            # Ensure that the number of columns and values match
+            # Masukkan data ke tabel
             cur.execute(f"""
                 INSERT INTO public."{table_name}" (
                     geom, {", ".join([f'"{col_name}"' for col_name in renamed_column_names])}
                 ) VALUES (
-                    ST_SetSRID(ST_GeomFromGeoJSON(%s::text), 4326),
+                    ST_Force3D(ST_SetSRID(ST_GeomFromGeoJSON(%s::text), 4326)),
                     {", ".join(["%s" for _ in renamed_column_names])}
                 )
             """, (
@@ -146,7 +153,6 @@ def run_ui():
 
         column_definitions = []
         for i in range(len(columns)):
-            # Cek apakah kolom sudah dihapus (tidak None)
             if col_name_entries[i] is not None and col_type_entries[i] is not None:
                 col_name = col_name_entries[i].get()
                 col_type = col_type_entries[i].get()
@@ -178,7 +184,6 @@ def run_ui():
 
                 column_definitions.append((col_name, col_type))
 
-        # Lanjutkan pembuatan tabel dengan kolom yang tersisa
         create_table_from_ui(db_config, table_name, column_definitions, geojson_file, status_label)
 
     # Fungsi untuk memuat GeoJSON dan menampilkan kolom
@@ -217,7 +222,6 @@ def run_ui():
             col_type_entry.insert(0, col_type_mapping(col_type))
             col_type_entries.append(col_type_entry)
 
-            # Button untuk menghapus kolom
             delete_button = tk.Button(columns_frame, text="Delete", command=lambda idx=i: delete_column(idx))
             delete_button.grid(row=i, column=7, padx=5, pady=5)
             delete_buttons.append(delete_button)
@@ -228,20 +232,16 @@ def run_ui():
         root.update_idletasks()
         root.geometry(f"{root.winfo_reqwidth()}x{root.winfo_reqheight()}")
 
-    # Fungsi untuk menghapus kolom
     def delete_column(idx):
-        # Hapus semua widget di baris terkait
         for widget in columns_frame.grid_slaves(row=idx):
             widget.grid_forget()
 
-        # Hapus kolom dari daftar
         col_name_entries[idx] = None
         col_type_entries[idx] = None
         col_length_entries[idx] = None
         col_precision_entries[idx] = None
         col_scale_entries[idx] = None
 
-    # Fungsi untuk menangani input tambahan sesuai tipe data
     def make_show_additional_fields(idx):
         def show_additional_fields(event=None):
             for widget in columns_frame.grid_slaves(row=idx, column=3):
@@ -330,7 +330,6 @@ def run_ui():
     submit_button = tk.Button(button_frame, text="Create Table", command=submit)
     submit_button.grid(row=0, column=1, padx=5)
 
-    # Button to delete the table
     delete_button = tk.Button(button_frame, text="Delete Table", command=lambda: delete_table({
         'dbname': dbname_entry.get(),
         'user': user_entry.get(),
